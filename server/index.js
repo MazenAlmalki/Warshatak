@@ -252,6 +252,12 @@ app.post('/api/chat',async(req,res)=>{
 
 app.use('/api',(_req,res)=>res.status(404).json({error:'مسار غير موجود.'}));
 if (!onVercel) app.get('*',(_req,res)=>res.sendFile(path.join(root,'public','index.html')));
+else app.get('*',(req,res,next)=>{
+ // Express framework routing may run before project rewrites. Redirect HTML
+ // navigation to the real CDN asset; never read frontend files in a Function.
+ if(!path.extname(req.path))return res.redirect(307,'/index.html');
+ return next();
+});
 app.use((error,_req,res,_next)=>{
  const tooLarge=error?.code==='LIMIT_FILE_SIZE'||error?.type==='entity.too.large';
  const status=tooLarge?413:error?.status===415?415:error?.status===400||error instanceof multer.MulterError?400:500;
