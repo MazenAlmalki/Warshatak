@@ -52,6 +52,10 @@ test('Vercel API preserves chat, analysis, safety and bounded image uploads', as
  response=await post('/api/chat',{message:'x'.repeat(17000)});assert.equal(response.status,413);
  response=await fetch(base+'/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:'{'});assert.equal(response.status,400);
  assert.equal((await fetch(base+'/api/missing')).status,404);
+ for(const path of ['/','/garage/history']){
+  const response=await fetch(base+path,{redirect:'manual'});
+  assert.equal(response.status,307);assert.equal(response.headers.get('location'),'/index.html');
+ }
  assert.equal((await fetch(base+'/styles.css')).status,404); // Served by Vercel CDN, not Express.
  delete process.env.CHAT_API_KEY;
  response=await post('/api/chat',{message:'Hello there'});assert.equal(response.status,503);
