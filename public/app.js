@@ -133,6 +133,7 @@ async function sendChat(text,{audioInterviewAnswer=null}={}){
    try{
     const mediaFile=await readBlob(active.mediaId);
     if(mediaFile){
+     await validateMediaUpload(mediaFile);
      const payload=new FormData();
      payload.append('media',mediaFile,active.mediaName||'recording');
      payload.append('language',active.lang||state.lang);
@@ -401,10 +402,29 @@ async function showSavedMedia(id,type,name){
   observer.observe(target,{childList:true});
  }catch{showError(t('mediaMissing'));}
 }
-function mediaFile(file){
+async function mediaCapabilities(){
+ const response=await fetch('/api/media-status');
+ if(!response.ok)throw Error(state.lang==='ar'?'تعذر التحقق من دعم المرفقات. حاول لاحقًا.':'Cannot verify upload support. Please try again later.');
+ const status=await response.json();
+ if(!status.uploads)throw Error(state.lang==='ar'?'خدمة المرفقات غير متاحة.':'Upload service unavailable.');
+ return status.uploads;
+}
+async function validateMediaUpload(file){
+ const capabilities=await mediaCapabilities();
+ const type=file.type.split(';')[0];
+ const category=type.split('/')[0];
+ if(!capabilities[category==='image'?'images':category] ||
+    (!capabilities.audio && !['image/jpeg','image/png','image/webp'].includes(type)))
+  throw Error(state.lang==='ar'?'معالجة الصوت والفيديو غير متاحة على هذا الخادم. أرفق صورة JPEG أو PNG أو WebP أو اكتب وصف الصوت.':'Audio/video processing is unavailable on this server. Attach a JPEG, PNG or WebP image, or describe the sound in text.');
+ if(file.size>capabilities.maxBytes)throw Error(state.lang==='ar'
+  ?'الحد الأقصى للمرفق '+(capabilities.maxBytes/1024/1024)+' ميبيبايت على هذا الخادم.'
+  :'Maximum attachment size on this server: '+(capabilities.maxBytes/1024/1024)+' MiB.');
+}
+async function mediaFile(file){
  if(!file)return;
  if(!['audio/','video/','image/'].some(prefix=>file.type.startsWith(prefix))){showError(t('fileType'));return;}
  if(file.size>25*1024*1024){showError(t('fileTooLarge'));return;}
+ try{await validateMediaUpload(file);}catch(error){showError(error.message);return;}
  pendingMedia=file;showError('');showMedia(file);
 }
 async function recordToggle(){
@@ -412,6 +432,8 @@ async function recordToggle(){
  if(submitting)return;
  if(!navigator.mediaDevices?.getUserMedia||!globalThis.MediaRecorder){showError(t('recordUnsupported'));return;}
  try{
+  const capabilities=await mediaCapabilities();
+  if(!capabilities.audio){showError(state.lang==='ar'?'تحليل التسجيلات الصوتية غير متاح على هذا الخادم؛ اكتب وصف الصوت.':'Audio recording analysis is unavailable on this server; describe the sound in text.');return;}
   mediaStream=await navigator.mediaDevices.getUserMedia({audio:true});
   recorder=new MediaRecorder(mediaStream);mediaChunks=[];
   recorder.ondataavailable=e=>{if(e.data?.size)mediaChunks.push(e.data);};

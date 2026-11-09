@@ -22,13 +22,17 @@ import { planMinimalQuestions, enforceQuestionBudget } from './minimalQuestions.
 import { retrieveConditionalPatterns } from './conditionalNoiseRetrieval.js';
 import { visionConfiguration, DEFAULT_VISION_MODEL } from './llamaVision.js';
 
+export function createApp() {
 const app = express();
+const onVercel = process.env.VERCEL === '1';
+// Vercel overwrites X-Forwarded-For with the client IP at its trusted edge.
+if (onVercel) app.set('trust proxy', 1);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 app.disable('x-powered-by');
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '16kb' }));
 app.use('/api', rateLimit({ windowMs: 900000, limit: 30, standardHeaders: 'draft-7', legacyHeaders: false }));
-app.use(express.static(path.join(root, 'public')));
+if (!onVercel) app.use(express.static(path.join(root, 'public')));
 
 const choices = {
   timing: ['عند التشغيل','أثناء القيادة','عند الفرامل','عند الالتفاف','على المطبات','عند التسارع','غير متأكد'],
@@ -57,7 +61,7 @@ app.get('/api/model-status',(_req,res)=>{
   configured:{
    chat:chat.model,chatProvider:chat.provider,chatApiConfigured:chat.configured,
    vision:visionModel,visionApiConfigured:visionConfigured,
-   audioClapEnabled:process.env.ENABLE_AUDIO_CLAP==='1',
+   audioClapEnabled:!onVercel && process.env.ENABLE_AUDIO_CLAP==='1',
    audioModel:process.env.CLAP_MODEL?.trim()||'laion/clap-htsat-unfused'
   },
   // Provider key presence does not verify key validity, credits or model availability.
@@ -74,7 +78,7 @@ app.post('/api/analyze',async(req,res)=>{
   for(const [key,values] of Object.entries(choices)) if(!values.includes(data[key])) return res.status(400).json({error:'أكمل جميع أسئلة وصف الصوت أولًا.'});
   let api;
   try{api=chatProvider();}
-  catch(error){return res.status(503).json({error:error.message==='CHAT_API_KEY_MISSING'?'أضف مفتاح OpenRouter في CHAT_API_KEY داخل .env.':'إعدادات مزود Llama غير صحيحة.'});}
+  catch(error){return res.status(503).json({error:error.message==='CHAT_API_KEY_MISSING'?'أضف مفتاح OpenRouter في CHAT_API_KEY في إعدادات الخادم.':'إعدادات مزود Llama غير صحيحة.'});}
   try {
     const headers={'Content-Type':'application/json'};
     if(api.key)headers.Authorization='Bearer '+api.key;
@@ -88,26 +92,29 @@ app.post('/api/analyze',async(req,res)=>{
     const result=validateResult(parsed);
     if(!result) return res.status(502).json({error:'نتيجة الذكاء الاصطناعي ناقصة، حاول مرة ثانية.'});
     return res.json({result,poweredBy:'Llama',knowledgeMatches:retrievedKnowledge.map(({id,symptom_ar,symptom_en,source_url})=>({id,symptom_ar,symptom_en,source_url}))});
-  }catch(error){console.error('Llama request:',error instanceof Error?error.message:'unknown');return res.status(502).json({error:'تعذّر الاتصال بـ Llama API. تأكد من اتصال الإنترنت ومفتاح API ورصيد المزود.'});}
+  }catch(error){console.error('Llama request failed');return res.status(502).json({error:'تعذّر الاتصال بـ Llama API. تأكد من اتصال الإنترنت ومفتاح API ورصيد المزود.'});}
 });
 
-const uploadMedia=multer({storage:multer.memoryStorage(),limits:{fileSize:25*1024*1024,files:1,fields:1},fileFilter:(_req,file,cb)=>{if(/^(audio|video|image)\//.test(file.mimetype))cb(null,true);else cb(new Error('Unsupported media type'));}});
+const uploadMedia=multer({storage:multer.memoryStorage(),limits:{fileSize:(onVercel?4:25)*1024*1024,files:1,fields:1},fileFilter:(_req,file,cb)=>{if(/^(audio|video|image)\//.test(file.mimetype))cb(null,true);else cb(Object.assign(new Error('Unsupported media type'),{status:415}));}});
 app.get('/api/media-status',async(_req,res)=>{
- const ffmpeg=await ffmpegAvailable();
+ const ffmpeg=!onVercel && await ffmpegAvailable();
  res.json({
+  uploads:{maxBytes:(onVercel?4:25)*1024*1024,images:true,audio:!onVercel,video:!onVercel},
+  speechTranscriptionEnabled:!onVercel && process.env.ENABLE_SPEECH_TRANSCRIPTION==='1',
   ffmpegReady:ffmpeg,
   waveformAnalysisReady:ffmpeg,
   videoFrameAnalysisReady:ffmpeg,
   visionModelConfigured:process.env.VISION_MODEL?.trim()?.startsWith('meta-llama/')?process.env.VISION_MODEL.trim():DEFAULT_VISION_MODEL,
   visionApiConfigured:publicChatConfiguration().configured,
-  audioClapEnabled:process.env.ENABLE_AUDIO_CLAP==='1',
-  note:'Images and sampled video frames use hosted Meta Llama 4 Scout API; FFmpeg extracts video frames. CLAP is separate and optional. Waveform features cannot identify car defects.'
+  audioClapEnabled:!onVercel && process.env.ENABLE_AUDIO_CLAP==='1',
+  note:onVercel?'Vercel supports JPEG/PNG/WebP images up to 4 MiB. Audio/video, FFmpeg, CLAP and Whisper are unavailable; describe sounds in text.':'Images and sampled video frames use hosted Meta Llama 4 Scout API; FFmpeg extracts video frames. CLAP is separate and optional. Waveform features cannot identify car defects.'
  });
 });
 app.post('/api/media/analyze',uploadMedia.single('media'),async(req,res)=>{
+ if(onVercel && req.file && !/^image\/(jpeg|png|webp)$/.test(req.file.mimetype))return res.status(422).json({error:'Audio/video processing is unavailable on Vercel. Upload a JPEG, PNG or WebP image up to 4 MiB, or describe the sound in text. معالجة الصوت والفيديو غير متاحة على Vercel؛ أرفق صورة حتى 4 ميبيبايت أو اكتب وصف الصوت.'});
  if(!req.file)return res.status(400).json({error:'أرفق ملف صورة أو صوت أو فيديو.'});
  try{const result=await analyzeUploadedMedia(req.file,req.body?.language==='en'?'en':'ar');return res.json({analysis:result});}
- catch(error){console.error('Media analysis:',String(error.message).slice(0,350));return res.status(422).json({error:String(error.message).slice(0,400)});}
+ catch(error){console.error('Media analysis failed');return res.status(422).json({error:onVercel?'Image analysis unavailable. Check server configuration, model access and provider credits. تعذر تحليل الصورة؛ تحقق من إعدادات الخادم ورصيد المزود.':String(error.message).slice(0,400)});}
 });
 
 const chatPrompt = `You are Warshatak (ورشتك), a helpful Saudi car assistant. Speak like a normal, thoughtful person, not like a call center, promotional chatbot or scripted questionnaire.
@@ -212,7 +219,7 @@ app.post('/api/chat',async(req,res)=>{
     : null;
   let api;
   try{api=chatProvider();}
-  catch(error){return res.status(503).json({error:language==='en'?'Configure CHAT_API_KEY and CHAT_API_URL in your server .env.':'أضف مفتاح OpenRouter في CHAT_API_KEY داخل .env ثم أعد تشغيل السيرفر.'});}
+  catch(error){return res.status(503).json({error:language==='en'?'Configure CHAT_API_KEY and CHAT_API_URL in your server environment.':'أضف مفتاح OpenRouter في CHAT_API_KEY في إعدادات الخادم ثم أعد النشر.'});}
   try{
     const headers={'Content-Type':'application/json'};
     if(api.key)headers.Authorization='Bearer '+api.key;
@@ -240,10 +247,18 @@ app.post('/api/chat',async(req,res)=>{
       ? safetyWarning+'\n'+naturalReply : naturalReply;
     const conciseReply=enforceQuestionBudget(safeReply,questionPlan,{language});
     return res.json({reply:conciseReply,grounding:'language-model-with-retrieval',knowledgeMatches:[...summary,...saudiSources.map(x=>({id:x.id,symptom_ar:x.topic,symptom_en:x.topic,source_url:x.source_url})),...soundReading.map(x=>({id:x.subject,symptom_ar:x.title,symptom_en:x.title,source_url:x.url})),...conditionalPatterns.map(x=>({id:x.id,symptom_ar:x.symptom_ar,symptom_en:x.symptom_ar,source_url:x.source_url}))]});
-  }catch(error){console.error('Llama chat:',error instanceof Error?error.message:'unknown');return res.status(502).json({error:language==='en'?'Cannot reach the AI model. Check your configuration.':'تعذّر الاتصال بمودل الذكاء الاصطناعي. تأكد من الإعدادات.'});}
+  }catch(error){console.error('Llama chat failed');return res.status(502).json({error:language==='en'?'Cannot reach the AI model. Check your configuration.':'تعذّر الاتصال بمودل الذكاء الاصطناعي. تأكد من الإعدادات.'});}
 });
 
 app.use('/api',(_req,res)=>res.status(404).json({error:'مسار غير موجود.'}));
-app.get('*',(_req,res)=>res.sendFile(path.join(root,'public','index.html')));
-app.use((error,_req,res,_next)=>res.status(error?.code==='LIMIT_FILE_SIZE'?413:400).json({error:error?.code==='LIMIT_FILE_SIZE'?'الحد الأقصى للملف 25 ميجابايت.':'تعذر معالجة الملف المرفوع.'}));
-app.listen(Number(process.env.PORT||3000),()=>console.log('Warshatak server running'));
+if (!onVercel) app.get('*',(_req,res)=>res.sendFile(path.join(root,'public','index.html')));
+app.use((error,_req,res,_next)=>{
+ const tooLarge=error?.code==='LIMIT_FILE_SIZE'||error?.type==='entity.too.large';
+ const status=tooLarge?413:error?.status===415?415:error?.status===400||error instanceof multer.MulterError?400:500;
+ return res.status(status).json({error:tooLarge
+  ? (onVercel?'Image limit: 4 MiB; text limit: 16 KiB. حد الصورة 4 ميبيبايت والنص 16 كيبيبايت.':'الحد الأقصى للملف 25 ميجابايت والنص 16 كيبيبايت.')
+  : 'تعذر معالجة الطلب. Unable to process request.'});
+});
+return app;
+}
+export default createApp();

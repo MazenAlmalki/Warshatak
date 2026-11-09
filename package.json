@@ -5,13 +5,13 @@
   "description": "Arabic-first AI vehicle noise assistant powered by Llama",
   "type": "module",
   "scripts": {
-    "dev": "node --watch server/index.js",
-    "start": "node server/index.js",
-    "check": "node --check server/index.js && node --check server/multimodal.js && node --check server/audioWaveform.js && node --check server/mediaStatus.js && node --check server/conversationContext.js && node --check server/saudiUnderstanding.js && node --check server/saudiDialect.js && node --check server/saudiCarTerms.js && node --check server/chatLanguage.js && node --check server/saudiKnowledge.js && node --check server/textRetrieval.js && node --check public/app.js && node --check server/soundInterview.js && node --check server/soundReferences.js && node --check server/chatProvider.js && node --check server/llamaVision.js && node --check server/contextEngine.js && node --check server/minimalQuestions.js && node --check server/conditionalNoiseRetrieval.js",
+    "dev": "node --watch server/local.js",
+    "start": "node server/local.js",
+    "check": "node --check index.js && node --check server/local.js && node --check server/index.js && node --check server/multimodal.js && node --check server/audioWaveform.js && node --check server/mediaStatus.js && node --check server/conversationContext.js && node --check server/saudiUnderstanding.js && node --check server/saudiDialect.js && node --check server/saudiCarTerms.js && node --check server/chatLanguage.js && node --check server/saudiKnowledge.js && node --check server/textRetrieval.js && node --check public/app.js && node --check server/soundInterview.js && node --check server/soundReferences.js && node --check server/chatProvider.js && node --check server/llamaVision.js && node --check server/contextEngine.js && node --check server/minimalQuestions.js && node --check server/conditionalNoiseRetrieval.js",
     "test": "node --test"
   },
   "engines": {
-    "node": ">=20"
+    "node": "24.x"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

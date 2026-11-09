@@ -29,8 +29,9 @@ test('classifier evaluates up to 20 seconds with separate windows',()=>{
 });
 
 test('backend does not pretend to recognize sound based on waveform or silence',()=>{
- assert.ok(server.includes('audio-classifier-not-configured'));
- assert.ok(server.includes('audio-no-usable-sound'));
+ assert.match(server,/!classified && !wasAttempted.*beginSoundInterview\(\{language,reason:'classifier-not-configured'/);
+ assert.match(server,/!classified && wasAttempted && mediaObject\?\.audioEventAnalysis\?\.succeeded===true/);
+ assert.ok(server.includes("beginSoundInterview({language,reason:'no-candidates'})"));
  assert.ok(server.includes('CLAP only ranks descriptions by similarity'));
- assert.ok(server.includes("if(!classified && wasAttempted)return res.json(mediaClarification(language,true))"));
+ assert.ok(server.includes("beginSoundInterview({language,reason:'classifier-error',error:failure})"));
 });
