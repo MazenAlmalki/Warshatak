@@ -57,6 +57,7 @@ async function audioSimilarity(input){
  return result;
 }
 export async function analyzeUploadedMedia(file,language='ar'){
+ if(process.env.VERCEL==='1'&&!file.mimetype.startsWith('image/'))throw Error('Audio/video processing is unavailable on Vercel. Describe the sound in text.');
  const extension=fileExtension(file.mimetype);
  if(!extension)throw new Error(language==='en'?'Unsupported media type.':'نوع الملف غير مدعوم.');
  if(!file.buffer?.length||file.size>25*1024*1024)throw new Error(language==='en'?'File must be below 25 MB.':'الملف يجب أن يكون أقل من 25 ميجابايت.');

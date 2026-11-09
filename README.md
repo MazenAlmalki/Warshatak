@@ -5,6 +5,54 @@
 
 Warshatak (ورشتك) is an Arabic/English vehicle-noise assistant with a responsive dashboard, light/dark themes, vehicle folders and history, and optional local audio/video attachments.
 
+## Production deployment on Vercel
+
+This section is the deployment source of truth. Older setup notes below are historical and do not override these steps. Use Node.js **24.x** (the pinned production runtime).
+
+### Deploy using the dashboard
+
+1. Merge the Vercel preparation branch/PR into the GitHub branch you want to deploy (normally `main`). These files must be in GitHub before importing; importing the unchanged original branch will not include these fixes.
+2. Open [Vercel New Project](https://vercel.com/new), connect GitHub, and import **MazenAlmalki/Warshatak**. Grant Vercel access to this repository if requested.
+3. Keep **Root Directory** at the repository root (`./`). Use **Express** as Framework Preset (auto-detected and declared in `vercel.json`). Keep Build Command and Output Directory at framework defaults; do not select a static-only preset or set a custom output directory. Install Command can remain automatic (`npm ci` with the committed lockfile). In Project Settings → Build and Deployment, confirm Node.js **24.x**. Do not use `npm start` as a build command.
+4. In Environment Variables, add the following server variables for **Production** and **Preview** (and Development if you use `vercel dev`). Enter the real key only in Vercel, never in frontend code or GitHub files:
+
+   | Variable | Value |
+   | --- | --- |
+   | `CHAT_API_URL` | `https://openrouter.ai/api/v1/chat/completions` |
+   | `CHAT_API_KEY` | Your private OpenRouter API key; required, mark Sensitive |
+   | `CHAT_MODEL` | `meta-llama/llama-3.3-70b-instruct` |
+   | `VISION_MODEL` | `meta-llama/llama-4-scout` |
+   | `CHAT_MAX_TOKENS` | `450` (optional; allowed range is bounded by the server) |
+
+   `CHAT_API_URL`, `CHAT_MODEL`, and `VISION_MODEL` have these defaults, but setting all four explicitly makes deployment configuration clear. Ensure the OpenRouter account has credits and access to both models. Leave local audio flags unset or `0`. Do not set `PORT`, `VERCEL`, `FFMPEG_PATH`, or Python/model paths on Vercel. The platform supplies `VERCEL=1`.
+5. Click **Deploy**. For later environment changes use Project Settings → Environment Variables, save, then Deployments → Redeploy; changes apply to new deployments. The Git integration deploys future production-branch pushes automatically and gives other branches Preview URLs.
+6. Visit `/`, `/app.js`, `/styles.css`, `/api/health`, `/api/model-status`, and `/api/media-status` on the deployment URL. Confirm Arabic/English, themes, a new vehicle folder, reload-persistent history, a real text conversation, and a small JPEG/PNG/WebP attachment. A `configured: true` status means only that credentials are present; a real chat/image request verifies access and credits. Test an oversized image and audio/video selection: each must show the capability message without uploading. Use Runtime Logs for HTTP status failures; never print keys or provider request headers.
+
+No Vercel account or production API credential is stored in this repository. Local tests use a fake provider; they do not prove live OpenRouter credits/model access or a completed Vercel deployment.
+
+### Runtime, routing, and limits
+
+- The officially supported [Express default export](https://vercel.com/docs/frameworks/backend/express) is at root `index.js`. `server/index.js` creates/exports the app without listening; `server/local.js` alone starts the local HTTP listener. No framework migration or frontend rebuild is required.
+- `public/` is served directly by Vercel's CDN. Express static serving and `sendFile` fallback run only locally. `vercel.json` rewrites `/` and extensionless frontend routes to `index.html`, leaving `/api` and asset paths intact. All six existing API paths remain: `/api/chat`, `/api/analyze`, `/api/health`, `/api/model-status`, `/api/media-status`, `/api/media/analyze`. Data files needed for retrieval are explicitly included in the Function bundle. Function duration is 120 seconds; hosted calls time out after 60 seconds.
+- [Vercel Functions limit request and response bodies to 4.5 MB](https://vercel.com/docs/functions/limitations). The original 25 MB multipart endpoint cannot run unchanged. On Vercel, JPEG/PNG/WebP images are limited to **4 MiB (4,194,304 bytes)**, leaving space for multipart metadata below 4.5 MB. The browser checks server capabilities before selection/upload, including saved attachments; Multer also enforces the server limit. Requests sent outside the UI over the platform's limit may receive Vercel's own `413 FUNCTION_PAYLOAD_TOO_LARGE` before Express executes. JSON stays limited to 16 KiB.
+- **Audio/video uploads and microphone analysis are explicitly unavailable on Vercel**, even if local feature flags are enabled. The interface explains this in Arabic/English and suggests a text description or still image. FFmpeg, Python CLAP and Whisper are not installed, downloaded or launched there. Existing local media history/playback is retained. To support larger files later, implement authenticated direct-to-object-storage uploads plus a separate media worker; raising Multer's limit does not bypass Vercel's limit.
+- Text, history context, safety prompts, output checks, Helmet and the existing **30 API requests / 15 minutes** limiter remain. Vercel's trusted proxy is enabled for client-IP limits. The limiter is in memory: each Function instance has its own counters and cold starts reset them. For a global abuse/cost quota across scaled instances, configure Vercel WAF rate limiting (where supported by your plan) or add a shared rate-limit store. The current limiter alone is not a global quota.
+- Vehicle folders, themes, Arabic/English preference and text history remain in localStorage; media remains in IndexedDB. Storage is per browser **and origin**, so a new Preview/production domain will not automatically contain history from localhost or another deployment domain. Temporary image files use `/tmp` and are removed after processing. There is no persistent server disk or database requirement. OpenRouter calls and the API key remain exclusively on the backend.
+
+### Local development and checks
+
+```sh
+npm ci
+cp .env.example .env
+# Set CHAT_API_KEY privately in .env.
+npm start
+# Open http://localhost:3000
+npm run check
+npm test
+```
+
+`npm run dev` uses Node watch mode. Local runs retain the 25 MB media limit and optional FFmpeg/CLAP/Whisper behavior described in `MULTIMODAL_SETUP.md`. Never set `VERCEL=1` for normal local operation. `.env*` secrets, `.vercel/`, and logs are excluded from Git/deployment; `.env.example` contains placeholders only.
+
 ## Features
 - Arabic / English user interface and Llama output (language setting preserved locally)
 - Dark / light theme (saved locally)
@@ -15,7 +63,9 @@ Warshatak (ورشتك) is an Arabic/English vehicle-noise assistant with a respo
 
 **Multimodal V5:** Files remain saved locally in IndexedDB for history, and **when the user presses Send with a new attachment**, a copy is temporarily uploaded to this Node backend for processing. Images and sampled video frames use the configured vision model. Optional CLAP may analyze audio if specifically installed and enabled. The default chat model itself **cannot listen to sound**, and similarity results are not verified diagnoses. See [`MULTIMODAL_SETUP.md`](MULTIMODAL_SETUP.md).
 
-## Free Llama on Windows
+## Historical setup notes (not current deployment instructions)
+
+### Free Llama on Windows
 
 1. Install or update [Ollama](https://ollama.com/download).
 2. Run:
