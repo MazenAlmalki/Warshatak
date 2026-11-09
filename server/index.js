@@ -322,4 +322,8 @@ app.post('/api/chat',async(req,res)=>{
 app.use('/api',(_req,res)=>res.status(404).json({error:'مسار غير موجود.'}));
 app.get('*',(_req,res)=>res.sendFile(path.join(root,'public','index.html')));
 app.use((error,req,res,_next)=>res.status(error?.code==='LIMIT_FILE_SIZE'?413:400).json({error:error?.code==='LIMIT_FILE_SIZE'?(req.path==='/api/speech/transcribe'?'الحد الأقصى للإملاء 5 MiB.':'الحد الأقصى للملف 25 ميجابايت.'):'تعذر معالجة الملف المرفوع.'}));
-app.listen(Number(process.env.PORT||3000),()=>console.log('Warshatak server running'));
+if (!process.env.VERCEL) {
+  app.listen(Number(process.env.PORT || 3000), () => console.log('Warshatak server running'));
+}
+
+export default app;
